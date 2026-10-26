@@ -1,3 +1,5 @@
+[![Build Android APK](https://github.com/shugen002/MediaMTX-Android/actions/workflows/android.yml/badge.svg)](https://github.com/shugen002/MediaMTX-Android/actions/workflows/android.yml)
+
 # MTX 控制台
 
 Flutter Android 客户端，完整说明见仓库根目录 [`../README.md`](../README.md)。
