@@ -1,4 +1,4 @@
-package io.mediamtx.mediamtx_manager
+package space.shugen.mediamtx
 
 import android.database.Cursor
 import android.database.MatrixCursor

@@ -255,7 +255,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: FutureBuilder<PackageInfo>(
                     future: PackageInfo.fromPlatform(),
                     builder: (context, snapshot) {
-                      final version = snapshot.data?.version ?? '1.0.1';
+                      final version = snapshot.data?.version ?? '1.0.2';
                       return Column(
                         children: [
                           Text(

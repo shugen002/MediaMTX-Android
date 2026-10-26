@@ -1,4 +1,4 @@
-package io.mediamtx.mediamtx_manager
+package space.shugen.mediamtx
 
 import android.content.Context
 import android.util.Log

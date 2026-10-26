@@ -1,4 +1,4 @@
-package io.mediamtx.mediamtx_manager
+package space.shugen.mediamtx
 
 import android.Manifest
 import android.content.ClipData
@@ -22,7 +22,7 @@ import java.net.NetworkInterface
 import java.util.Collections
 
 class MainActivity : FlutterActivity() {
-    private val channelName = "io.mediamtx.console/local_server"
+    private val channelName = "space.shugen.mediamtx/local_server"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

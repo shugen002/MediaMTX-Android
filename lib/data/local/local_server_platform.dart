@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/local_server_models.dart';
 
 class LocalServerPlatform {
-  static const _channel = MethodChannel('io.mediamtx.console/local_server');
+  static const _channel = MethodChannel('space.shugen.mediamtx/local_server');
 
   bool get isSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;

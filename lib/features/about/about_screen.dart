@@ -38,7 +38,7 @@ class AboutScreen extends StatelessWidget {
                 FutureBuilder<PackageInfo>(
                   future: PackageInfo.fromPlatform(),
                   builder: (context, snapshot) => Text(
-                    'v${snapshot.data?.version ?? '1.0.1'} · Flutter',
+                    'v${snapshot.data?.version ?? '1.0.2'} · Flutter',
                     style: textTheme.bodySmall?.copyWith(
                       color: colors.textTertiary,
                     ),
@@ -118,7 +118,7 @@ class AboutScreen extends StatelessWidget {
                         onTap: () => showLicensePage(
                           context: context,
                           applicationName: 'MTX 控制台',
-                          applicationVersion: 'v1.0.1',
+                          applicationVersion: 'v1.0.2',
                           applicationIcon: const Padding(
                             padding: EdgeInsets.all(12),
                             child: BrandMark(size: 52),

@@ -1,4 +1,4 @@
-package io.mediamtx.mediamtx_manager
+package space.shugen.mediamtx
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -14,8 +14,8 @@ import androidx.core.app.NotificationCompat
 
 class LocalServerService : Service() {
     companion object {
-        const val ACTION_START = "io.mediamtx.console.START_LOCAL_SERVER"
-        const val ACTION_STOP = "io.mediamtx.console.STOP_LOCAL_SERVER"
+        const val ACTION_START = "space.shugen.mediamtx.START_LOCAL_SERVER"
+        const val ACTION_STOP = "space.shugen.mediamtx.STOP_LOCAL_SERVER"
         private const val CHANNEL_ID = "mtx_local_server"
         private const val NOTIFICATION_ID = 4312
 
