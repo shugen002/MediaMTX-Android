@@ -106,11 +106,11 @@ class ManageScreen extends StatelessWidget {
                           ),
                         ),
                         StatusPill(
-                          label: app.isConnected ? '已连接' : '离线',
-                          color: app.isConnected
+                          label: app.isApiReady ? 'API 正常' : '无法访问',
+                          color: app.isApiReady
                               ? colors.success
                               : colors.danger,
-                          pulse: app.isConnected,
+                          pulse: app.isApiReady,
                           dense: true,
                         ),
                       ],
@@ -269,23 +269,10 @@ class ManageScreen extends StatelessWidget {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: () async {
-                    final confirmed = await showConfirmDialog(
-                      context,
-                      title: '断开连接？',
-                      message: '将返回服务器列表，不会停止服务端。',
-                      confirmLabel: '断开',
-                    );
-                    if (confirmed) await app.disconnect();
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: colors.danger,
-                    side: BorderSide(
-                      color: colors.danger.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  icon: const Icon(Icons.logout_rounded, size: 18),
-                  label: const Text('断开当前服务器'),
+                  // MediaMTX 没有服务端会话可断开，这里只是回到服务器列表切换目标。
+                  onPressed: app.closeActiveServer,
+                  icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                  label: const Text('切换服务器'),
                 ),
               ),
             ],

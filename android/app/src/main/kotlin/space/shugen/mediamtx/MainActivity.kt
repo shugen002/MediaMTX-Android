@@ -135,6 +135,41 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "space.shugen.mediamtx/preview",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "open" -> {
+                    val hls = call.argument<String>("hlsUrl")
+                    val rtsp = call.argument<String>("rtspUrl")
+                    if (hls.isNullOrBlank() && rtsp.isNullOrBlank()) {
+                        result.error("bad_args", "缺少播放地址", null)
+                        return@setMethodCallHandler
+                    }
+                    val intent = Intent(this, PreviewPlayerActivity::class.java).apply {
+                        putExtra(
+                            PreviewPlayerActivity.EXTRA_TITLE,
+                            call.argument<String>("title") ?: "",
+                        )
+                        putExtra(
+                            PreviewPlayerActivity.EXTRA_SUBTITLE,
+                            call.argument<String>("subtitle") ?: "",
+                        )
+                        putExtra(PreviewPlayerActivity.EXTRA_HLS_URL, hls)
+                        putExtra(PreviewPlayerActivity.EXTRA_RTSP_URL, rtsp)
+                    }
+                    try {
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (error: Exception) {
+                        result.error("preview_failed", error.message, null)
+                    }
+                }
+
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {

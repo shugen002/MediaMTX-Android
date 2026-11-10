@@ -3,7 +3,10 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
+import '../../core/utils/url_utils.dart';
 import '../../core/widgets/common.dart';
+import '../../data/local/local_server_controller.dart';
+import '../../data/local/preview_player.dart';
 import '../../data/models/media_snapshot.dart';
 import '../../state/app_state.dart';
 import 'path_detail_screen.dart';
@@ -35,6 +38,40 @@ class _PathsScreenState extends State<PathsScreen> {
       context,
     ).push<bool>(MaterialPageRoute(builder: (_) => const PathEditorScreen()));
     if (created == true) await app.refresh();
+  }
+
+  /// 直接用原生播放器预览一条在线路径，省去进入详情页。
+  Future<void> _previewPath(PathView view) async {
+    final app = context.read<AppState>();
+    final profile = app.active;
+    if (profile == null) return;
+    final local = context.read<LocalServerController>();
+    final endpoints = buildStreamEndpoints(
+      profile,
+      view.name,
+      app.globalConfig,
+      hostOverride: profile.isLocal ? local.lanAddress : null,
+    );
+    StreamEndpoint? hls;
+    StreamEndpoint? rtsp;
+    for (final endpoint in endpoints) {
+      if (endpoint.protocol == 'HLS') hls = endpoint;
+      if (endpoint.protocol == 'RTSP') rtsp = endpoint;
+    }
+    if (hls == null && rtsp == null) {
+      showAppSnack(context, '当前服务器没有可预览的播放地址', error: true);
+      return;
+    }
+    try {
+      await PreviewPlayer.open(
+        title: view.name,
+        hlsUrl: hls?.readUrl,
+        rtspUrl: rtsp?.readUrl,
+        subtitle: view.runtime?.tracks.map((track) => track.label).join(' · '),
+      );
+    } catch (error) {
+      if (mounted) showAppSnack(context, '无法打开预览：$error', error: true);
+    }
   }
 
   @override
@@ -136,11 +173,11 @@ class _PathsScreenState extends State<PathsScreen> {
                 onSelected: (value) => setState(() => _filter = value),
               ),
               const SizedBox(height: 16),
-              if (app.status == ServerConnectionStatus.offline)
+              if (app.status == ApiStatus.unreachable)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: ErrorBanner(
-                    message: app.error ?? '连接中断，显示上次同步的数据',
+                    message: app.error ?? '无法读取服务器，显示上次同步的数据',
                     onRetry: () => app.refresh(),
                     compact: true,
                   ),
@@ -171,6 +208,7 @@ class _PathsScreenState extends State<PathsScreen> {
                     padding: const EdgeInsets.only(bottom: 10),
                     child: _PathCard(
                       view: path,
+                      onPreview: path.online ? () => _previewPath(path) : null,
                       onTap: () async {
                         await Navigator.of(context).push(
                           MaterialPageRoute(
@@ -205,10 +243,11 @@ class _PathsScreenState extends State<PathsScreen> {
 }
 
 class _PathCard extends StatelessWidget {
-  const _PathCard({required this.view, required this.onTap});
+  const _PathCard({required this.view, required this.onTap, this.onPreview});
 
   final PathView view;
   final VoidCallback onTap;
+  final VoidCallback? onPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -223,17 +262,25 @@ class _PathCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.11),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Icon(
-                  view.online ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                  color: accent,
-                  size: 21,
+              Tooltip(
+                message: onPreview == null ? '路径离线，无法预览' : '预览直播',
+                child: GestureDetector(
+                  onTap: onPreview,
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.11),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Icon(
+                      view.online
+                          ? Icons.play_arrow_rounded
+                          : Icons.pause_rounded,
+                      color: accent,
+                      size: 21,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 11),

@@ -127,7 +127,7 @@ class _LocalServerScreenState extends State<LocalServerScreen>
     );
     if (!confirmed) return;
     if (app.active?.isLocal == true) {
-      await app.disconnect();
+      await app.closeActiveServer();
     }
     await local.uninstall();
     if (!mounted) return;
@@ -480,7 +480,7 @@ class _StatusHero extends StatelessWidget {
                         ),
                   label: Text(
                     connecting
-                        ? '连接中'
+                        ? '正在打开…'
                         : local.phase == LocalPhase.downloading
                         ? '正在下载…'
                         : local.phase == LocalPhase.installing
@@ -488,7 +488,7 @@ class _StatusHero extends StatelessWidget {
                         : local.phase == LocalPhase.starting
                         ? '正在启动…'
                         : running
-                        ? '连接并管理'
+                        ? '打开面板'
                         : installed
                         ? '启动服务'
                         : '下载并启动',
@@ -909,6 +909,29 @@ class _BackgroundProtectionCard extends StatelessWidget {
                 child: const Text('应用设置'),
               ),
             ],
+          ),
+          Divider(color: colors.border, height: 17),
+          SwitchListTile.adaptive(
+            value: local.autoStart,
+            onChanged: local.setAutoStart,
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: Text(
+              '打开应用时自动运行',
+              style: textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                fontSize: 11.5,
+              ),
+            ),
+            subtitle: Text(
+              local.autoStart
+                  ? '下次打开应用会自动拉起本机 MediaMTX'
+                  : '已关闭：打开应用后需要手动点「启动服务」',
+              style: textTheme.labelSmall?.copyWith(
+                color: colors.textTertiary,
+                fontSize: 9.5,
+              ),
+            ),
           ),
         ],
       ),

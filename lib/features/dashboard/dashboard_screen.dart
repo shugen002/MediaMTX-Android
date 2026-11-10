@@ -110,8 +110,7 @@ class DashboardScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 16),
-              if (app.status == ServerConnectionStatus.offline &&
-                  app.error != null) ...[
+              if (app.status == ApiStatus.unreachable && app.error != null) ...[
                 ErrorBanner(
                   message: '连接已中断 · 当前显示上次同步数据\n${app.error!}',
                   onRetry: () => app.refresh(),
@@ -122,7 +121,7 @@ class DashboardScreen extends StatelessWidget {
               _ServerHero(
                 info: snapshot.info,
                 profile: app.active!,
-                online: app.status == ServerConnectionStatus.online,
+                online: app.status == ApiStatus.ready,
               ),
               const SizedBox(height: 13),
               _MetricGrid(

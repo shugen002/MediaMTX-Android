@@ -81,17 +81,14 @@ class _BootGateState extends State<_BootGate> {
       local.initialize(),
       Future<void>.delayed(const Duration(milliseconds: 900)),
     ]);
+    // 启动时不做任何“自动接管”：不打开上次的服务器，也不因为某个服务器
+    // 是本机就把 MediaMTX 拉起来。只有用户显式打开「打开应用时自动运行」
+    // 这个开关，才在后台把本机服务带起来（页面仍然停在服务器列表）。
     if (local.supported &&
         local.install != null &&
-        !local.status.running &&
-        app.active?.isLocal == true) {
-      final started = await local.start();
-      if (started &&
-          app.active?.isLocal == true &&
-          app.snapshot == null &&
-          mounted) {
-        await app.connect(app.active!, silent: true);
-      }
+        local.autoStart &&
+        !local.status.running) {
+      await local.start();
     }
     if (!mounted) return;
     setState(() => _ready = true);
@@ -101,9 +98,8 @@ class _BootGateState extends State<_BootGate> {
   Widget build(BuildContext context) {
     if (!_ready) return const _SplashScreen();
     final app = context.watch<AppState>();
-    if (app.snapshot != null && app.active != null && !app.showServerList) {
-      return const AppShell();
-    }
+    // 没有“当前服务器”：打开哪台就显示哪台的面板，返回即关闭并回到列表。
+    if (app.active != null) return const AppShell();
     return const ServersScreen();
   }
 }

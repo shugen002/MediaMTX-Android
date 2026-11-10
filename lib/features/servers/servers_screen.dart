@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -15,31 +18,59 @@ import 'server_form_screen.dart';
 class ServersScreen extends StatelessWidget {
   const ServersScreen({super.key});
 
+  /// 服务器列表是根页面，返回键即退出应用。本机服务在跑时先问一句：
+  /// 是停止服务再退出，还是留在后台继续跑。
+  Future<void> _handleExit(BuildContext context) async {
+    final local = context.read<LocalServerController>();
+    if (!local.isRunning) {
+      await SystemNavigator.pop();
+      return;
+    }
+    final choice = await showDialog<_ExitChoice>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.power_settings_new_rounded),
+        title: const Text('退出 MTX 控制台？'),
+        content: const Text(
+          '本机 MediaMTX 正在运行。选择「保持后台运行」后应用会退出，'
+          '服务继续在后台运行，可以随时从通知栏停止它。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, _ExitChoice.background),
+            child: const Text('保持后台运行'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, _ExitChoice.stop),
+            child: const Text('停止服务并退出'),
+          ),
+        ],
+      ),
+    );
+    if (choice == null) return;
+    if (choice == _ExitChoice.stop) {
+      // stop() 内部会同时关掉「打开应用时自动运行」。
+      await local.stop();
+    }
+    if (!context.mounted) return;
+    await SystemNavigator.pop();
+  }
+
   Future<void> _openForm(BuildContext context, {ServerProfile? profile}) async {
     final app = context.read<AppState>();
     final result = await Navigator.of(context).push<ServerProfile>(
       MaterialPageRoute(builder: (_) => ServerFormScreen(profile: profile)),
     );
-    if (result != null && app.active?.id != result.id) {
-      final ok = await app.connect(result);
-      if (!context.mounted) return;
-      if (!ok) {
-        showAppSnack(context, app.error ?? '连接失败', error: true);
-      }
+    if (result != null) {
+      await app.openServer(result);
     }
   }
 
-  Future<void> _connect(BuildContext context, ServerProfile profile) async {
+  /// 打开一台服务器的面板。不做任何隐式动作：不会顺手拉起本机服务，
+  /// 打开失败就在面板里显示错误并提供重试。
+  Future<void> _openServer(BuildContext context, ServerProfile profile) async {
     final app = context.read<AppState>();
-    if (app.active?.id == profile.id && app.snapshot != null) {
-      app.resumeShell();
-      return;
-    }
-    final ok = await app.connect(profile);
-    if (!context.mounted) return;
-    if (!ok) {
-      showAppSnack(context, app.error ?? '连接失败', error: true);
-    }
+    await app.openServer(profile);
   }
 
   Future<void> _delete(BuildContext context, ServerProfile profile) async {
@@ -63,22 +94,20 @@ class ServersScreen extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
 
+    // 服务器列表是应用的根页面：返回键退出应用（本机服务在跑时先问一句），
+    // 不再回跳到会话界面，否则会在「会话」和「服务器列表」之间来回切换。
+    // 想回到面板直接点当前服务器的卡片即可。
     return PopScope(
-      canPop: app.snapshot == null || app.active == null,
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        if (app.snapshot != null) app.resumeShell();
+        unawaited(_handleExit(context));
       },
       child: Scaffold(
         body: AppBackdrop(
           child: SafeArea(
             child: RefreshIndicator(
-              onRefresh: () async {
-                await local.refreshStatus();
-                if (app.active != null) {
-                  await app.connect(app.active!, silent: true);
-                }
-              },
+              onRefresh: local.refreshStatus,
               child: CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
@@ -190,9 +219,6 @@ class ServersScreen extends StatelessWidget {
                               ErrorBanner(
                                 message: app.error!,
                                 onClose: app.clearError,
-                                onRetry: app.active == null
-                                    ? null
-                                    : () => _connect(context, app.active!),
                               ),
                             ],
                             if (app.servers.isEmpty) ...[
@@ -208,7 +234,7 @@ class ServersScreen extends StatelessWidget {
                             ] else ...[
                               SectionHeader(
                                 title: '我的服务器',
-                                subtitle: '${app.servers.length} 个已保存的连接',
+                                subtitle: '${app.servers.length} 个已保存的服务器',
                                 padding: const EdgeInsets.fromLTRB(
                                   2,
                                   30,
@@ -217,20 +243,11 @@ class ServersScreen extends StatelessWidget {
                                 ),
                               ),
                               ...app.servers.map((server) {
-                                final active = app.active?.id == server.id;
-                                final connecting =
-                                    active &&
-                                    app.status ==
-                                        ServerConnectionStatus.connecting;
-                                final online = active && app.isConnected;
                                 return Padding(
                                   padding: const EdgeInsets.only(bottom: 11),
                                   child: _ServerCard(
                                     profile: server,
-                                    active: active,
-                                    connecting: connecting,
-                                    online: online,
-                                    onTap: () => _connect(context, server),
+                                    onTap: () => _openServer(context, server),
                                     onEdit: () =>
                                         _openForm(context, profile: server),
                                     onDelete: () => _delete(context, server),
@@ -285,21 +302,17 @@ class ServersScreen extends StatelessWidget {
   }
 }
 
+enum _ExitChoice { background, stop }
+
 class _ServerCard extends StatelessWidget {
   const _ServerCard({
     required this.profile,
-    required this.active,
-    required this.connecting,
-    required this.online,
     required this.onTap,
     required this.onEdit,
     required this.onDelete,
   });
 
   final ServerProfile profile;
-  final bool active;
-  final bool connecting;
-  final bool online;
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -309,15 +322,9 @@ class _ServerCard extends StatelessWidget {
     final colors = context.colors;
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final statusColor = online
-        ? colors.success
-        : connecting
-        ? scheme.primary
-        : colors.textTertiary;
     return SurfaceCard(
-      onTap: connecting ? null : onTap,
+      onTap: onTap,
       padding: const EdgeInsets.fromLTRB(15, 15, 10, 15),
-      borderColor: active ? scheme.primary.withValues(alpha: 0.45) : null,
       child: Row(
         children: [
           Container(
@@ -381,86 +388,54 @@ class _ServerCard extends StatelessWidget {
                     fontSize: 11.5,
                   ),
                 ),
-                const SizedBox(height: 7),
-                Row(
-                  children: [
-                    StatusDot(color: statusColor, size: 5, pulse: online),
-                    const SizedBox(width: 2),
-                    Text(
-                      connecting
-                          ? '正在连接'
-                          : online
-                          ? '已连接'
-                          : active
-                          ? '离线'
-                          : '点击连接',
-                      style: textTheme.labelSmall?.copyWith(
-                        color: statusColor,
-                        fontWeight: FontWeight.w600,
-                      ),
+                if (profile.lastConnectedAt != null) ...[
+                  const SizedBox(height: 7),
+                  Text(
+                    '上次打开 ${relativeTime(profile.lastConnectedAt)}',
+                    style: textTheme.labelSmall?.copyWith(
+                      color: colors.textTertiary,
+                      fontWeight: FontWeight.w500,
                     ),
-                    if (profile.lastConnectedAt != null &&
-                        !online &&
-                        !connecting) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        '· ${relativeTime(profile.lastConnectedAt)}',
-                        style: textTheme.labelSmall?.copyWith(
-                          color: colors.textTertiary,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+                  ),
+                ],
               ],
             ),
           ),
           const SizedBox(width: 4),
-          if (connecting)
-            const Padding(
-              padding: EdgeInsets.all(10),
-              child: SizedBox(
-                width: 17,
-                height: 17,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
-          else
-            PopupMenuButton<String>(
-              tooltip: '更多',
-              icon: Icon(
-                Icons.more_vert_rounded,
-                color: colors.textTertiary,
-                size: 20,
-              ),
-              onSelected: (value) {
-                if (value == 'edit') onEdit();
-                if (value == 'delete') onDelete();
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Row(
-                    children: [
-                      Icon(Icons.edit_outlined, size: 18),
-                      SizedBox(width: 10),
-                      Text('编辑'),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_outline_rounded, size: 18),
-                      SizedBox(width: 10),
-                      Text('删除'),
-                    ],
-                  ),
-                ),
-              ],
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            icon: Icon(
+              Icons.more_vert_rounded,
+              color: colors.textTertiary,
+              size: 20,
             ),
+            onSelected: (value) {
+              if (value == 'edit') onEdit();
+              if (value == 'delete') onDelete();
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'edit',
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_outlined, size: 18),
+                    SizedBox(width: 10),
+                    Text('编辑'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_outline_rounded, size: 18),
+                    SizedBox(width: 10),
+                    Text('删除'),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

@@ -10,6 +10,7 @@ import '../../core/widgets/common.dart';
 import '../../data/api/api_exception.dart';
 import '../../data/models/path_config.dart';
 import '../../data/local/local_server_controller.dart';
+import '../../data/local/preview_player.dart';
 import '../../data/models/runtime_path.dart';
 import '../../state/app_state.dart';
 import 'path_editor_screen.dart';
@@ -85,6 +86,40 @@ class _PathDetailScreenState extends State<PathDetailScreen> {
   Future<void> _refresh() async {
     await _load();
     if (mounted) await context.read<AppState>().refresh(silent: true);
+  }
+
+  /// 用原生播放器预览当前路径（HLS 优先，失败自动退到 RTSP）。
+  Future<void> _openPreview() async {
+    final app = context.read<AppState>();
+    final profile = app.active;
+    if (profile == null) return;
+    final local = context.read<LocalServerController>();
+    final endpoints = buildStreamEndpoints(
+      profile,
+      widget.pathName,
+      app.globalConfig,
+      hostOverride: profile.isLocal ? local.lanAddress : null,
+    );
+    StreamEndpoint? hls;
+    StreamEndpoint? rtsp;
+    for (final endpoint in endpoints) {
+      if (endpoint.protocol == 'HLS') hls = endpoint;
+      if (endpoint.protocol == 'RTSP') rtsp = endpoint;
+    }
+    if (hls == null && rtsp == null) {
+      showAppSnack(context, '当前服务器没有可预览的播放地址', error: true);
+      return;
+    }
+    try {
+      await PreviewPlayer.open(
+        title: widget.pathName,
+        hlsUrl: hls?.readUrl,
+        rtspUrl: rtsp?.readUrl,
+        subtitle: _runtime?.tracks.map((track) => track.label).join(' · '),
+      );
+    } catch (error) {
+      if (mounted) showAppSnack(context, '无法打开预览：$error', error: true);
+    }
   }
 
   Future<void> _editConfig() async {
@@ -297,6 +332,40 @@ class _PathDetailScreenState extends State<PathDetailScreen> {
                               value: '${runtime?.tracks.length ?? 0}',
                               online: online,
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            FilledButton.icon(
+                              onPressed: online ? _openPreview : null,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: online
+                                    ? colors.success
+                                    : Colors.white12,
+                                foregroundColor: online
+                                    ? const Color(0xFF04241C)
+                                    : Colors.white38,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 13,
+                                ),
+                              ),
+                              icon: const Icon(
+                                Icons.play_circle_outline_rounded,
+                                size: 19,
+                              ),
+                              label: const Text('预览直播'),
+                            ),
+                            const SizedBox(width: 12),
+                            if (!online)
+                              Text(
+                                '推流上线后可预览',
+                                style: textTheme.labelSmall?.copyWith(
+                                  color: Colors.white38,
+                                  fontSize: 10,
+                                ),
+                              ),
                           ],
                         ),
                       ],
@@ -514,7 +583,12 @@ class _PathDetailScreenState extends State<PathDetailScreen> {
                     child: Column(
                       children: [
                         for (final endpoint in endpoints)
-                          _EndpointRow(endpoint: endpoint),
+                          _EndpointRow(
+                            endpoint: endpoint,
+                            onPreview: endpoint.protocol == 'HLS' && online
+                                ? _openPreview
+                                : null,
+                          ),
                       ],
                     ),
                   ),
@@ -715,9 +789,10 @@ class _TrackRow extends StatelessWidget {
 }
 
 class _EndpointRow extends StatelessWidget {
-  const _EndpointRow({required this.endpoint});
+  const _EndpointRow({required this.endpoint, this.onPreview});
 
   final StreamEndpoint endpoint;
+  final VoidCallback? onPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -746,6 +821,21 @@ class _EndpointRow extends StatelessWidget {
                   ),
                 ),
               ),
+              if (onPreview != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: onPreview,
+                  icon: const Icon(Icons.play_arrow_rounded, size: 15),
+                  color: scheme.primary,
+                  tooltip: '预览',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 26,
+                    minHeight: 26,
+                  ),
+                ),
+              ],
               const Spacer(),
               Text(
                 endpoint.publishUrl.isEmpty ? '播放' : '播放 / 推流',

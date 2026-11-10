@@ -12,20 +12,20 @@ import '../data/models/runtime_path.dart';
 import '../data/models/server_profile.dart';
 import '../data/repositories/server_store.dart';
 
-enum ServerConnectionStatus { idle, connecting, online, offline }
+/// MediaMTX 是纯 HTTP 控制面，没有“连接会话”这回事；
+/// 这里只表示当前服务器 API 的可用性。
+enum ApiStatus { idle, loading, ready, unreachable }
 
 class AppState extends ChangeNotifier {
-  AppState({ServerStore? store, this.autoConnect = true})
-    : _store = store ?? ServerStore();
+  AppState({ServerStore? store}) : _store = store ?? ServerStore();
 
   final ServerStore _store;
-  final bool autoConnect;
 
   final List<ServerProfile> _servers = [];
   ServerProfile? _active;
   ApiClient? _api;
   MediaMtxService? _service;
-  ServerConnectionStatus _status = ServerConnectionStatus.idle;
+  ApiStatus _status = ApiStatus.idle;
   String? _error;
   MediaSnapshot? _snapshot;
   SessionSummary _sessions = SessionSummary.empty;
@@ -35,7 +35,6 @@ class AppState extends ChangeNotifier {
   bool _refreshing = false;
   bool _disposed = false;
   bool _booting = true;
-  bool _showServerList = false;
   int _refreshTick = 0;
   int _generation = 0;
   int _refreshSeconds = 10;
@@ -43,10 +42,9 @@ class AppState extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
 
   bool get isBooting => _booting;
-  bool get showServerList => _showServerList;
   List<ServerProfile> get servers => List.unmodifiable(_servers);
   ServerProfile? get active => _active;
-  ServerConnectionStatus get status => _status;
+  ApiStatus get status => _status;
   String? get error => _error;
   MediaSnapshot? get snapshot => _snapshot;
   SessionSummary get sessions => _sessions;
@@ -54,15 +52,13 @@ class AppState extends ChangeNotifier {
   List<TrafficSample> get traffic => List.unmodifiable(_traffic);
   int get refreshSeconds => _refreshSeconds;
   ThemeMode get themeMode => _themeMode;
-  bool get isConnected =>
-      _active != null &&
-      _snapshot != null &&
-      _status != ServerConnectionStatus.offline;
+  bool get isApiReady =>
+      _active != null && _snapshot != null && _status != ApiStatus.unreachable;
   MediaMtxService? get service => _service;
   MediaMtxService get requireService {
     final value = _service;
     if (value == null) {
-      throw const ApiException('尚未连接到服务器', kind: ApiErrorKind.network);
+      throw const ApiException('尚未打开服务器', kind: ApiErrorKind.network);
     }
     return value;
   }
@@ -78,15 +74,8 @@ class AppState extends ChangeNotifier {
         ..addAll(await _store.loadProfiles());
       _refreshSeconds = await _store.readRefreshSeconds();
       _themeMode = _modeFromString(await _store.readThemeMode());
-      if (autoConnect) {
-        final lastId = await _store.readLastServerId();
-        if (lastId != null) {
-          final profile = _serverById(lastId);
-          if (profile != null) {
-            await connect(profile, silent: true);
-          }
-        }
-      }
+      // 启动时不自动打开任何服务器：MediaMTX 没有“保持连接”的概念，
+      // 打开应用先停在服务器列表，由用户选择要看的服务器。
     } finally {
       _booting = false;
       _safeNotify();
@@ -100,15 +89,16 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  Future<bool> connect(ServerProfile profile, {bool silent = false}) async {
+  /// 选中一台服务器并读取它的数据。内部仍然保持轮询，
+  /// 但不再有“连接/断开”的语义，只是一次切换 + 拉取。
+  Future<bool> openServer(ServerProfile profile, {bool silent = false}) async {
     _generation++;
-    _showServerList = false;
     _timer?.cancel();
     _api?.close();
     _api = null;
     _service = null;
     _active = profile;
-    _status = ServerConnectionStatus.connecting;
+    _status = ApiStatus.loading;
     _error = null;
     _snapshot = null;
     _globalConfig = null;
@@ -164,7 +154,7 @@ class AppState extends ChangeNotifier {
             totalOutbound: _snapshot!.outboundBytes,
           ),
         );
-      _status = ServerConnectionStatus.online;
+      _status = ApiStatus.ready;
       _error = null;
       _refreshTick = 0;
       final index = _servers.indexWhere((server) => server.id == profile.id);
@@ -175,20 +165,19 @@ class AppState extends ChangeNotifier {
         _active = _servers[index];
       }
       await _store.saveProfiles(_servers);
-      await _store.saveLastServerId(profile.id);
       _startTimer();
       _safeNotify();
       unawaited(refreshSessionCounts());
       return true;
     } on ApiException catch (error) {
       api.close();
-      _status = ServerConnectionStatus.offline;
+      _status = ApiStatus.unreachable;
       _error = error.friendlyMessage;
       _safeNotify();
       return false;
     } catch (error) {
       api.close();
-      _status = ServerConnectionStatus.offline;
+      _status = ApiStatus.unreachable;
       _error = '连接失败：$error';
       _safeNotify();
       return false;
@@ -215,7 +204,7 @@ class AppState extends ChangeNotifier {
         fetchedAt: fetchedAt,
       );
       _recordTraffic(fetchedAt);
-      _status = ServerConnectionStatus.online;
+      _status = ApiStatus.ready;
       _error = null;
       _refreshTick++;
       if (withSessions || _refreshTick % 3 == 0) {
@@ -223,11 +212,11 @@ class AppState extends ChangeNotifier {
       }
       _safeNotify();
     } on ApiException catch (error) {
-      _status = ServerConnectionStatus.offline;
+      _status = ApiStatus.unreachable;
       _error = error.friendlyMessage;
       _safeNotify();
     } catch (error) {
-      _status = ServerConnectionStatus.offline;
+      _status = ApiStatus.unreachable;
       _error = '刷新失败：$error';
       _safeNotify();
     } finally {
@@ -299,7 +288,7 @@ class AppState extends ChangeNotifier {
   Future<void> setRefreshSeconds(int seconds) async {
     _refreshSeconds = seconds;
     await _store.saveRefreshSeconds(seconds);
-    if (isConnected) _startTimer();
+    if (isApiReady) _startTimer();
     _safeNotify();
   }
 
@@ -333,14 +322,13 @@ class AppState extends ChangeNotifier {
     await _store.deleteSecret(profile.id);
     await _store.saveProfiles(_servers);
     if (_active?.id == profile.id) {
-      await disconnect();
+      await closeActiveServer();
     }
     _safeNotify();
   }
 
-  Future<void> disconnect() async {
+  Future<void> closeActiveServer() async {
     _generation++;
-    _showServerList = false;
     _timer?.cancel();
     _api?.close();
     _api = null;
@@ -350,9 +338,8 @@ class AppState extends ChangeNotifier {
     _globalConfig = null;
     _traffic.clear();
     _sessions = SessionSummary.empty;
-    _status = ServerConnectionStatus.idle;
+    _status = ApiStatus.idle;
     _error = null;
-    await _store.saveLastServerId(null);
     _safeNotify();
   }
 
@@ -388,7 +375,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> connectToProfileId(String id) async {
     final profile = _serverById(id);
-    if (profile != null) await connect(profile);
+    if (profile != null) await openServer(profile);
   }
 
   Future<bool> connectToLocalServer({
@@ -409,19 +396,7 @@ class AppState extends ChangeNotifier {
       }
     }
     if (profile == null) return false;
-    return connect(profile);
-  }
-
-  void showServers() {
-    if (_showServerList) return;
-    _showServerList = true;
-    _safeNotify();
-  }
-
-  void resumeShell() {
-    if (!_showServerList) return;
-    _showServerList = false;
-    _safeNotify();
+    return openServer(profile);
   }
 
   void clearError() {

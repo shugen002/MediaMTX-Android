@@ -114,38 +114,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     await app.refresh(withSessions: true);
   }
 
-  Future<void> _switchServer() async {
-    final app = context.read<AppState>();
-    final selected = await showModalBottomSheet<ServerProfile>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => _ServerSheet(
-        servers: app.servers,
-        active: app.active,
-        onAdd: () {
-          Navigator.pop(context);
-          _addServer();
-        },
-        onSettings: () {
-          Navigator.pop(context);
-          _editServer();
-        },
-      ),
-    );
-    if (selected == null || !mounted) return;
-    if (selected.id == app.active?.id) return;
-    final ok = await app.connect(selected);
-    if (!mounted) return;
-    if (!ok) showAppSnack(context, app.error ?? '连接失败', error: true);
-  }
-
   Future<void> _addServer() async {
     final app = context.read<AppState>();
     final profile = await Navigator.of(context).push<ServerProfile>(
       MaterialPageRoute(builder: (_) => const ServerFormScreen()),
     );
     if (profile != null && mounted) {
-      final ok = await app.connect(profile);
+      final ok = await app.openServer(profile);
       if (!ok && mounted) {
         showAppSnack(context, app.error ?? '连接失败', error: true);
       }
@@ -159,17 +134,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => ServerFormScreen(profile: profile)),
     );
-  }
-
-  Future<void> _disconnect() async {
-    final app = context.read<AppState>();
-    final confirmed = await showConfirmDialog(
-      context,
-      title: '断开连接？',
-      message: '将返回服务器列表，本机保存的配置不会被删除。',
-      confirmLabel: '断开',
-    );
-    if (confirmed) await app.disconnect();
   }
 
   @override
@@ -186,11 +150,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       const ManageScreen(),
     ];
 
+    if (app.snapshot == null) {
+      return _OpeningScaffold(
+        profile: profile,
+        error: app.status == ApiStatus.loading ? null : app.error,
+        onRetry: () => app.openServer(profile),
+        onClose: app.closeActiveServer,
+      );
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        app.showServers();
+        // 返回即关闭这台服务器的面板，回到服务器列表。
+        app.closeActiveServer();
       },
       child: Scaffold(
         extendBody: true,
@@ -201,10 +175,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               children: [
                 _ShellHeader(
                   profile: profile,
-                  online: app.isConnected,
-                  connecting: app.status == ServerConnectionStatus.connecting,
+                  online: app.isApiReady,
+                  connecting: app.status == ApiStatus.loading,
                   onRefresh: _refresh,
-                  onSwitch: _switchServer,
                   onEdit: _editServer,
                   onAdd: _addServer,
                   onLocal: () => Navigator.of(context).push(
@@ -215,7 +188,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   onSettings: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const SettingsScreen()),
                   ),
-                  onDisconnect: _disconnect,
+                  onClose: app.closeActiveServer,
                 ),
                 Expanded(
                   child: IndexedStack(index: _index, children: pages),
@@ -240,24 +213,22 @@ class _ShellHeader extends StatelessWidget {
     required this.online,
     required this.connecting,
     required this.onRefresh,
-    required this.onSwitch,
     required this.onEdit,
     required this.onAdd,
     required this.onLocal,
     required this.onSettings,
-    required this.onDisconnect,
+    required this.onClose,
   });
 
   final ServerProfile profile;
   final bool online;
   final bool connecting;
   final Future<void> Function() onRefresh;
-  final VoidCallback onSwitch;
   final VoidCallback onEdit;
   final VoidCallback onAdd;
   final VoidCallback onLocal;
   final VoidCallback onSettings;
-  final VoidCallback onDisconnect;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -276,7 +247,7 @@ class _ShellHeader extends StatelessWidget {
           const SizedBox(width: 11),
           Expanded(
             child: InkWell(
-              onTap: onSwitch,
+              onTap: onClose,
               borderRadius: BorderRadius.circular(10),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
@@ -298,8 +269,8 @@ class _ShellHeader extends StatelessWidget {
                         ),
                         const SizedBox(width: 5),
                         Icon(
-                          Icons.unfold_more_rounded,
-                          size: 14,
+                          Icons.arrow_back_ios_new_rounded,
+                          size: 11,
                           color: colors.textTertiary,
                         ),
                       ],
@@ -312,10 +283,10 @@ class _ShellHeader extends StatelessWidget {
                         Flexible(
                           child: Text(
                             online
-                                ? '${hostWithPort(profile)} · 在线'
+                                ? '${hostWithPort(profile)} · API 正常'
                                 : connecting
-                                ? '正在连接…'
-                                : '连接中断',
+                                ? '正在读取…'
+                                : '无法访问该服务器',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: textTheme.labelSmall?.copyWith(
@@ -359,8 +330,6 @@ class _ShellHeader extends StatelessWidget {
             ),
             onSelected: (value) {
               switch (value) {
-                case 'switch':
-                  onSwitch();
                 case 'edit':
                   onEdit();
                 case 'add':
@@ -369,18 +338,12 @@ class _ShellHeader extends StatelessWidget {
                   onLocal();
                 case 'settings':
                   onSettings();
-                case 'disconnect':
-                  onDisconnect();
               }
             },
             itemBuilder: (context) => const [
               PopupMenuItem(
-                value: 'switch',
-                child: _MenuRow(icon: Icons.swap_horiz_rounded, label: '切换服务器'),
-              ),
-              PopupMenuItem(
                 value: 'edit',
-                child: _MenuRow(icon: Icons.tune_rounded, label: '连接设置'),
+                child: _MenuRow(icon: Icons.tune_rounded, label: '服务器设置'),
               ),
               PopupMenuItem(
                 value: 'local',
@@ -395,13 +358,112 @@ class _ShellHeader extends StatelessWidget {
                 value: 'settings',
                 child: _MenuRow(icon: Icons.settings_outlined, label: '偏好设置'),
               ),
-              PopupMenuItem(
-                value: 'disconnect',
-                child: _MenuRow(icon: Icons.logout_rounded, label: '断开连接'),
-              ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _OpeningScaffold extends StatelessWidget {
+  const _OpeningScaffold({
+    required this.profile,
+    required this.error,
+    required this.onRetry,
+    required this.onClose,
+  });
+
+  final ServerProfile profile;
+  final String? error;
+  final Future<void> Function() onRetry;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final textTheme = Theme.of(context).textTheme;
+    return Scaffold(
+      body: AppBackdrop(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    IconAction(
+                      icon: Icons.arrow_back_rounded,
+                      tooltip: '返回服务器列表',
+                      onPressed: onClose,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      profile.displayName,
+                      style: textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (error == null)
+                          const SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: CircularProgressIndicator(strokeWidth: 2.2),
+                          )
+                        else
+                          Icon(
+                            Icons.cloud_off_rounded,
+                            size: 34,
+                            color: colors.textTertiary,
+                          ),
+                        const SizedBox(height: 14),
+                        Text(
+                          error ?? '正在读取 ${profile.displayName}…',
+                          textAlign: TextAlign.center,
+                          style: textTheme.bodySmall?.copyWith(
+                            color: error == null
+                                ? colors.textSecondary
+                                : colors.danger,
+                            height: 1.5,
+                          ),
+                        ),
+                        if (error != null) ...[
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              FilledButton.icon(
+                                onPressed: () => onRetry(),
+                                icon: const Icon(
+                                  Icons.refresh_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text('重试'),
+                              ),
+                              const SizedBox(width: 10),
+                              OutlinedButton(
+                                onPressed: onClose,
+                                child: const Text('返回列表'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -417,131 +479,6 @@ class _MenuRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [Icon(icon, size: 18), const SizedBox(width: 10), Text(label)],
-    );
-  }
-}
-
-class _ServerSheet extends StatelessWidget {
-  const _ServerSheet({
-    required this.servers,
-    required this.active,
-    required this.onAdd,
-    required this.onSettings,
-  });
-
-  final List<ServerProfile> servers;
-  final ServerProfile? active;
-  final VoidCallback onAdd;
-  final VoidCallback onSettings;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final textTheme = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 4, 18, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '切换服务器',
-              style: textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '连接另一个 MediaMTX 实例',
-              style: textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(context).height * 0.45,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: servers.map((server) {
-                    final selected = server.id == active?.id;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: SurfaceCard(
-                        padding: const EdgeInsets.all(13),
-                        onTap: () => Navigator.pop(context, server),
-                        borderColor: selected
-                            ? scheme.primary.withValues(alpha: 0.5)
-                            : null,
-                        child: Row(
-                          children: [
-                            Icon(
-                              server.isLocal
-                                  ? Icons.smartphone_rounded
-                                  : Icons.dns_rounded,
-                              size: 20,
-                              color: selected
-                                  ? scheme.primary
-                                  : colors.textSecondary,
-                            ),
-                            const SizedBox(width: 11),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    server.displayName,
-                                    style: textTheme.titleSmall,
-                                  ),
-                                  Text(
-                                    server.baseUrl,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: textTheme.bodySmall?.copyWith(
-                                      color: colors.textTertiary,
-                                      fontSize: 10.5,
-                                      fontFamily: 'monospace',
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (selected)
-                              Icon(
-                                Icons.check_circle_rounded,
-                                color: scheme.primary,
-                                size: 19,
-                              ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onAdd,
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text('添加服务器'),
-                  ),
-                ),
-                const SizedBox(width: 9),
-                IconAction(
-                  icon: Icons.settings_outlined,
-                  tooltip: '当前连接设置',
-                  onPressed: onSettings,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

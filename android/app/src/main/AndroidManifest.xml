@@ -33,6 +33,13 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".PreviewPlayerActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|uiMode|screenLayout|density"
+            android:launchMode="singleTop" />
+
         <service
             android:name=".LocalServerService"
             android:exported="false"

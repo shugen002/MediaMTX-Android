@@ -75,6 +75,7 @@ class ServerStore {
   static const _mirrorEnabledKey = 'mtx.githubMirrorEnabled';
   static const _localPortsKey = 'mtx.localPorts';
   static const _localInstallKey = 'mtx.localInstall';
+  static const _localAutoStartKey = 'mtx.localAutoStart';
   static const _batteryPromptKey = 'mtx.batteryPromptShown';
 
   final SecretVault _vault;
@@ -179,6 +180,15 @@ class ServerStore {
 
   Future<void> saveLocalPorts(Map<String, dynamic> ports) async {
     await (await _prefs).setString(_localPortsKey, jsonEncode(ports));
+  }
+
+  /// 下次启动应用时是否自动拉起本机 MediaMTX；默认开启。
+  Future<bool> readLocalAutoStart() async {
+    return (await _prefs).getBool(_localAutoStartKey) ?? false;
+  }
+
+  Future<void> saveLocalAutoStart(bool value) async {
+    await (await _prefs).setBool(_localAutoStartKey, value);
   }
 
   Future<String?> readLocalCredentials() {

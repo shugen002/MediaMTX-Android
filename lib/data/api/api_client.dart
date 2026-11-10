@@ -180,10 +180,10 @@ class ApiClient {
     } on ApiException {
       rethrow;
     } on TimeoutException {
-      throw const ApiException('连接超时，请检查地址、端口和网络', kind: ApiErrorKind.timeout);
+      throw const ApiException('访问超时，请检查地址、端口和网络', kind: ApiErrorKind.timeout);
     } on http.ClientException catch (error) {
       throw ApiException(
-        '无法连接服务器，请检查地址和网络',
+        '无法访问服务器，请检查地址和网络',
         kind: ApiErrorKind.network,
         detail: error.message,
       );
@@ -194,7 +194,7 @@ class ApiClient {
           message.contains('Failed host lookup') ||
           message.contains('XMLHttpRequest')) {
         throw ApiException(
-          '无法连接服务器，请检查地址和网络',
+          '无法访问服务器，请检查地址和网络',
           kind: ApiErrorKind.network,
           detail: message,
         );

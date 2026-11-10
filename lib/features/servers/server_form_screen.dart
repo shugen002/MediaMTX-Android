@@ -159,7 +159,7 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
     });
     await app.saveServer(profile, secret: _isLocal ? null : _secret.text);
     if (app.active?.id == profile.id) {
-      await app.connect(profile, silent: true);
+      await app.openServer(profile, silent: true);
     }
     if (!mounted) return;
     Navigator.pop(context, profile);

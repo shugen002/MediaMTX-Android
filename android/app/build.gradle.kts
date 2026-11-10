@@ -76,6 +76,11 @@ kotlin {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
+    // 路径预览用的原生播放器（SurfaceView + 硬件解码，HLS / RTSP）。
+    implementation("androidx.media3:media3-exoplayer:1.9.2")
+    implementation("androidx.media3:media3-exoplayer-hls:1.9.2")
+    implementation("androidx.media3:media3-exoplayer-rtsp:1.9.2")
+    implementation("androidx.media3:media3-ui:1.9.2")
 }
 
 flutter {

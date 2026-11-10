@@ -88,6 +88,7 @@ class LocalServerController extends ChangeNotifier {
   String? _abi;
   String? _lanAddress;
   bool _ignoringBatteryOptimizations = false;
+  bool _autoStart = false;
   Timer? _eventTimer;
   String _lastLogTail = '';
   String? _lastEvent;
@@ -116,6 +117,7 @@ class LocalServerController extends ChangeNotifier {
   String? get abi => _abi;
   String? get lanAddress => _lanAddress;
   bool get ignoringBatteryOptimizations => _ignoringBatteryOptimizations;
+  bool get autoStart => _autoStart;
   String? get lastEvent => _lastEvent;
   int get eventRevision => _eventRevision;
   bool get isRunning => _status.running || _phase == LocalPhase.running;
@@ -158,6 +160,7 @@ class LocalServerController extends ChangeNotifier {
     }
     _credentials = LocalCredentials.decode(await _store.readLocalCredentials());
     _batteryPromptShown = await _store.readBatteryPromptShown();
+    _autoStart = await _store.readLocalAutoStart();
     if (!supported) {
       _phase = LocalPhase.unsupported;
       notifyListeners();
@@ -427,6 +430,9 @@ class LocalServerController extends ChangeNotifier {
 
   Future<void> stop() async {
     if (_busy || !supported) return;
+    // 手动停止视为「不要再自动拉起」：下次打开应用需要用户自己点启动，
+    // 直到再次手动启动（start / downloadAndStart 会把开关重新打开）。
+    await setAutoStart(false);
     _stopEventWatcher();
     _busy = true;
     _phase = LocalPhase.stopping;
@@ -521,6 +527,17 @@ class LocalServerController extends ChangeNotifier {
       await _store.saveMirrorPrefix(_mirrorPrefix);
     }
     await _store.saveMirrorEnabled(enabled);
+    notifyListeners();
+  }
+
+  /// 控制下次打开应用时是否自动拉起本机服务。
+  ///
+  /// 用户主动「停止服务并退出」后会被置为 false，避免下次启动又被自动拉起；
+  /// 手动点「启动服务」或重新安装会重新打开。
+  Future<void> setAutoStart(bool value) async {
+    if (_autoStart == value) return;
+    _autoStart = value;
+    await _store.saveLocalAutoStart(value);
     notifyListeners();
   }
 
